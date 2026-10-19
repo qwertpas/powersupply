@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#101715">
+  <meta name="theme-color" content="#f3f2ed">
   <title>powersupply</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="style.css">
@@ -27,11 +27,13 @@
     </section>
     <section class="plot-panel" aria-label="Rolling measurements">
       <div class="plot-controls"><label>Horizon <input id="horizon" type="number" min="1" max="120" value="15"> min</label><input id="range" aria-label="Horizon in minutes" type="range" min="1" max="120" value="15"><span id="rate"></span></div>
-      <canvas id="plot" aria-label="Rolling plot of selected measurements"></canvas>
-      <footer><span id="count">0 samples saved</span><span>3,600 plot points max · full CSV log</span></footer>
+      <div class="plot-area">
+        <canvas id="plot" aria-label="Rolling plot of selected measurements"></canvas>
+        <div id="tooltip" role="tooltip" hidden></div>
+      </div>
+      <footer><span id="count">0 samples saved</span><span>3,600 plot points max</span></footer>
     </section>
     <p id="message" role="alert"></p>
-    <p class="help">Chrome or Edge on desktop · USB-C communication port · 9600 baud · keep this tab open while logging</p>
   </main>
 </body>
 </html>

@@ -2,14 +2,15 @@ import {Supply, decode, MAX_POINTS, intervalFor, csvHeader, csvRow} from './prot
 
 const $ = id => document.getElementById(id);
 const fields = [
-  {key:'voltage', label:'Voltage', unit:'V', color:'#8be3b3'},
-  {key:'current', label:'Current', unit:'A', color:'#73bdf5'},
-  {key:'output', label:'Output', unit:'0 / 1', color:'#dfb673'},
-  {key:'temperature', label:'Temperature', unit:'°C', color:'#d69cda'}
+  {key:'voltage', label:'Voltage', unit:'V', color:'#287949'},
+  {key:'current', label:'Current', unit:'A', color:'#3168b0'},
+  {key:'output', label:'Output', unit:'0 / 1', color:'#97651d'},
+  {key:'temperature', label:'Temperature', unit:'°C', color:'#92529a'}
 ];
 let db, supply, running = false, busy = false, exporting = false, samples = [], count = 0, horizon = 15, lastTime = 0;
 let clearTimer, clearing = false, logVersion = 0;
 const canvas = $('plot'), ctx = canvas.getContext('2d');
+let pointer = null, hoverFrame;
 const duration = () => horizon * 60000;
 const interval = () => intervalFor(horizon);
 const message = text => { $('message').textContent = text; };
@@ -38,6 +39,8 @@ function controls() {
 }
 
 function draw() {
+  const tooltip = $('tooltip');
+  tooltip.hidden = true;
   const {width, height} = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
   if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
     canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
@@ -47,7 +50,7 @@ function draw() {
   const selected = fields.filter(f => document.querySelector(`[data-field="${f.key}"]`).checked);
   ctx.font = '11px system-ui';
   if (!selected.length || !samples.length) {
-    ctx.fillStyle = '#8da392'; ctx.textAlign = 'center';
+    ctx.fillStyle = '#747871'; ctx.textAlign = 'center';
     ctx.fillText(selected.length ? 'Connect to start logging' : 'Select a measurement to plot', width / 2, height / 2);
     return;
   }
@@ -55,6 +58,7 @@ function draw() {
   const visible = samples.filter(row => row.time >= start);
   const left = width < 600 ? 66 : 86, right = width - 22, bottom = height - 38;
   const lane = (bottom - 18) / selected.length;
+  let hit;
   selected.forEach((field, index) => {
     const top = 18 + index * lane + 20, base = 18 + (index + 1) * lane - 15;
     let low = Infinity, high = -Infinity;
@@ -70,8 +74,8 @@ function draw() {
       const value = field.key === 'output' ? tick / 2 : low + (high - low) * tick / 2;
       if (field.key === 'output' && tick === 1) continue;
       const py = y(value);
-      ctx.strokeStyle = '#25372b'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(left, py); ctx.lineTo(right, py); ctx.stroke();
-      ctx.textAlign = 'right'; ctx.fillStyle = '#8da392';
+      ctx.strokeStyle = '#e5e4de'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(left, py); ctx.lineTo(right, py); ctx.stroke();
+      ctx.textAlign = 'right'; ctx.fillStyle = '#747871';
       ctx.fillText(field.key === 'output' ? value.toFixed(0) : value.toFixed(2), left - 10, py + 4);
     }
     ctx.save(); ctx.beginPath(); ctx.rect(left, top - 2, right - left, base - top + 4); ctx.clip();
@@ -86,14 +90,39 @@ function draw() {
     ctx.stroke();
     if (visible.length === 1) { ctx.fillStyle = field.color; ctx.beginPath(); ctx.arc(x(visible[0].time), y(visible[0][field.key]), 3, 0, Math.PI * 2); ctx.fill(); }
     ctx.restore();
+    if (pointer && pointer.x >= left && pointer.x <= right && pointer.y >= top - 8 && pointer.y <= base + 8 && visible.length) {
+      const time = start + (pointer.x - left) / (right - left) * duration();
+      const row = visible.reduce((nearest, row) => Math.abs(row.time - time) < Math.abs(nearest.time - time) ? row : nearest);
+      hit = {field, row, x:x(row.time), y:y(row[field.key]), top, base};
+    }
   });
-  ctx.fillStyle = '#8da392';
+  ctx.fillStyle = '#747871';
   for (let i = 0; i <= 4; i++) {
     ctx.textAlign = i === 0 ? 'left' : i === 4 ? 'right' : 'center';
     const time = new Date(start + duration() * i / 4);
     ctx.fillText(time.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false}), left + (right - left) * i / 4, height - 14);
   }
+  if (hit) {
+    const {field, row, x, y, top, base} = hit;
+    ctx.save(); ctx.strokeStyle = field.color; ctx.setLineDash([3, 4]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, base); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = field.color; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    const time = new Date(row.time);
+    const stamp = `${time.toLocaleDateString()} ${time.toLocaleTimeString([], {hour12:false})}.${String(time.getMilliseconds()).padStart(3, '0')}`;
+    const digits = field.key === 'output' ? 0 : field.key === 'temperature' ? 1 : 3;
+    tooltip.textContent = `${field.label}: ${row[field.key].toFixed(digits)}${field.key === 'output' ? '' : ` ${field.unit}`}\n${stamp}`;
+    tooltip.hidden = false;
+    tooltip.style.left = `${Math.max(8, Math.min(pointer.x + 14, width - tooltip.offsetWidth - 8))}px`;
+    tooltip.style.top = `${Math.max(8, Math.min(pointer.y - tooltip.offsetHeight - 12, height - tooltip.offsetHeight - 8))}px`;
+  }
 }
+
+canvas.onpointermove = event => {
+  const rect = canvas.getBoundingClientRect();
+  pointer = {x:event.clientX - rect.left, y:event.clientY - rect.top};
+  if (!hoverFrame) hoverFrame = requestAnimationFrame(() => { hoverFrame = null; draw(); });
+};
+canvas.onpointerleave = () => { pointer = null; draw(); };
 
 async function restore() {
   const rows = await new Promise((resolve, reject) => {
