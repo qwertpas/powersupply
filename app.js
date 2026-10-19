@@ -8,6 +8,7 @@ const fields = [
   {key:'temperature', label:'Temperature', unit:'°C', color:'#d69cda'}
 ];
 let db, supply, running = false, busy = false, exporting = false, samples = [], count = 0, horizon = 15, lastTime = 0;
+let clearTimer, clearing = false, logVersion = 0;
 const canvas = $('plot'), ctx = canvas.getContext('2d');
 const duration = () => horizon * 60000;
 const interval = () => intervalFor(horizon);
@@ -30,7 +31,7 @@ function controls() {
   $('connect').textContent = running ? 'Disconnect' : 'Connect';
   $('connect').disabled = busy || !db || !navigator.serial;
   $('address').disabled = running || busy;
-  $('clear').disabled = running || busy || exporting || !count;
+  $('clear').disabled = !db || clearing;
   $('save').disabled = !count || busy || exporting;
   $('count').textContent = `${count.toLocaleString()} samples saved`;
   $('rate').textContent = `${(interval() / 1000).toFixed(2).replace(/0$/, '')} s / sample`;
@@ -159,13 +160,21 @@ document.querySelectorAll('[data-field]').forEach(input => { input.onchange = dr
 new ResizeObserver(draw).observe(canvas);
 
 $('clear').onclick = async () => {
-  if (!confirm('Delete all saved samples?')) return;
-  try { await transaction('readwrite', store => store.clear()); count = 0; samples = []; lastTime = 0; message(''); controls(); draw(); }
+  if (!clearTimer) {
+    $('clear').textContent = 'Click again to clear';
+    clearTimer = setTimeout(() => { clearTimer = null; $('clear').textContent = 'Clear log'; }, 5000);
+    return;
+  }
+  clearTimeout(clearTimer); clearTimer = null; clearing = true; logVersion++;
+  $('clear').textContent = 'Clear log'; controls();
+  try { await transaction('readwrite', store => store.clear()); count = 0; samples = []; lastTime = 0; message(''); draw(); }
   catch (error) { message(error.message); }
+  finally { clearing = false; controls(); }
 };
 
 $('save').onclick = async () => {
   let stream;
+  const version = logVersion;
   exporting = true; controls();
   try {
     const file = await window.showSaveFilePicker({suggestedName:`powersupply-${new Date().toISOString().replaceAll(':', '-')}.csv`, types:[{description:'CSV', accept:{'text/csv':['.csv']}}]});
@@ -174,13 +183,16 @@ $('save').onclick = async () => {
       const req = db.transaction('samples').objectStore('samples').openKeyCursor(null, 'prev');
       req.onsuccess = () => resolve(req.result?.key || 0); req.onerror = () => reject(req.error);
     });
+    if (version !== logVersion) throw Error('CSV canceled: log cleared.');
     await stream.write(csvHeader);
     let key = 0;
     while (key < last) {
       const rows = await transaction('readonly', store => store.getAll(IDBKeyRange.bound(key, last, true, false), 1000));
+      if (version !== logVersion) throw Error('CSV canceled: log cleared.');
       if (!rows.length) break;
       await stream.write(rows.map(csvRow).join('')); key = rows.at(-1).id;
     }
+    if (version !== logVersion) throw Error('CSV canceled: log cleared.');
     await stream.close(); stream = null; message('CSV saved.');
   } catch (error) { if (stream) await stream.abort(); if (error.name !== 'AbortError') message(error.message); }
   finally { exporting = false; controls(); }
